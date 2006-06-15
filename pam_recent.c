@@ -1,45 +1,51 @@
 /*
- * $Id$
+ * $Id: pam_recent.c,v 1.1 2006/06/14 06:24:24 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
  * Author:		Alexander Zangerl (az)
- * Licence:		GPL version 1.
+ * Licence:		GPL version 1 or version 2
  
  a pam module for linux systems to adjust an iptables recent list,
- which makes rate limiting connections not penalize successful logins from unknown locations.
+ which makes rate limiting connections not penalize successful logins
+ from unknown locations.
 
- the idea is that one uses the iptables recent match to rate-limit connections
- (eg. ssh), but does not want to penalize people who successfully log in. 
+ the idea is that one uses the iptables recent match to rate-limit
+ connections (eg. ssh), but does not want to penalize people who
+ successfully log in.
  
- if your good clients are all known anyway (static ip etc.), then you have no problem and 
- do not need this module. if however, you have unknown clients who you don't want to
- rate-limit if they manage a correct login, then this module allows you 
- to clear the client's ip address after the login has succeeded.
+ if your good clients are all known anyway (static ip etc.), then you
+ have no problem and do not need this module. if however, you have
+ unknown clients who you don't want to rate-limit if they manage a
+ correct login, then this module allows you to clear the client's ip
+ address after the login has succeeded.
 
  installation:
   gcc -shared -Xlinker -x -o pam_recent.so pam_recent.c  
   cp pam_recent.so /lib/modules/security/
 
- configuration:
- get your firewall to rate limit, the example here is ssh and assumes that these rules will only 
- be applied to new connection packets (so handle existing exchanges somewhere before these).
+ configuration: get your firewall to rate limit, the example here is
+ ssh and assumes that these rules will only be applied to new
+ connection packets (so handle existing exchanges somewhere before
+ these).
 	 
-  iptables -A INPUT -m recent --name SSH --rcheck --hitcount 2 --seconds 60 -j DROP
+  iptables -A INPUT -m recent --name SSH --rcheck --hitcount 2 \
+  	--seconds 60 -j DROP
   iptables -A INPUT -m recent --name SSH --set -j ACCEPT
 
- this allows up to two ssh connections per 60 seconds and records time stamps in /proc/net/ipt_recent/SSH. 
- then add the usual stanza to the pam config (here /etc/pam.d/ssh) and in the right place...
+ this allows up to two ssh connections per 60 seconds and records time
+ stamps in /proc/net/ipt_recent/SSH.  then add the usual stanza to the
+ pam config (here /etc/pam.d/ssh) and in the right place...
 
   session optional pam_recent.so - SSH
 
   and every successful login will clear this client's ip history.
 
 
-if you give "+" as first argument, then pam_recent will add an entry for this client ip address.
-if you give no second argument, the recent list "DEFAULT" will be used. 
-if you give any other arguments, you will get a syslogged error message - as will happen on errors.
-
+if you give "+" as first argument, then pam_recent will add an entry
+for this client ip address.  if you give no second argument, the
+recent list "DEFAULT" will be used.  if you give any other arguments,
+you will get a syslogged error message - as will happen on errors.
 
 */
 
