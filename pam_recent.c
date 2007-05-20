@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.1 2006/06/14 06:24:24 az Exp az $
+ * $Id: pam_recent.c,v 1.2 2006/06/15 05:00:02 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -7,12 +7,12 @@
  * Licence:		GPL version 1 or version 2
  
  a pam module for linux systems to adjust an iptables recent list,
- which makes rate limiting connections not penalize successful logins
- from unknown locations.
+ which makes the rate limiting of connections from unknown locations
+ easier.
 
- the idea is that one uses the iptables recent match to rate-limit
- connections (eg. ssh), but does not want to penalize people who
- successfully log in.
+ the idea is that one uses this module with iptables' recent module to
+ rate-limit connections to authenticated services (eg. ssh and ftp) 
+ without penalizing successful logins.
  
  if your good clients are all known anyway (static ip etc.), then you
  have no problem and do not need this module. if however, you have
@@ -21,32 +21,48 @@
  address after the login has succeeded.
 
  installation:
-  gcc -shared -Xlinker -x -o pam_recent.so pam_recent.c  
+  gcc -shared -fPIC -Xlinker -x -o pam_recent.so pam_recent.c  
   cp pam_recent.so /lib/modules/security/
 
- configuration: get your firewall to rate limit, the example here is
- ssh and assumes that these rules will only be applied to new
- connection packets (so handle existing exchanges somewhere before
- these).
-	 
-  iptables -A INPUT -m recent --name SSH --rcheck --hitcount 2 \
+ configuration: get your firewall to rate limit, the example here 
+ is for ssh and ftp and assumes that these rules will only be 
+ applied to new connection packets (so handle existing exchanges 
+ somewhere before these). the example also uses a custom chain
+ called limited to show how multiple services may be conveniently
+ grouped together in one rate-limited set.
+
+  # ...somewhere after handling packets that belong to existing conns:
+ iptables -A INPUT -p tcp --dport 22 -j limited # ssh
+ iptables -A INPUT -p tcp --dport 21 -j limited # ftp
+
+ iptables -A limited -m recent --name MYLIMIT --rcheck --hitcount 2 \
   	--seconds 60 -j DROP
-  iptables -A INPUT -m recent --name SSH --set -j ACCEPT
+ iptables -A sshlimited -m recent --name MYLIMIT --set -j ACCEPT 
 
- this allows up to two ssh connections per 60 seconds and records time
- stamps in /proc/net/ipt_recent/SSH.  then add the usual stanza to the
- pam config (here /etc/pam.d/ssh) and in the right place...
+ this allows up to two new ssh or ftp connections per 60 seconds 
+ and records time stamps in /proc/net/ipt_recent/MYLIMIT. 
+ then add the usual stanza to the relevant pam config files 
+ (here /etc/pam.d/ssh and ftp) in the right place (order matters!):
 
-  session optional pam_recent.so - SSH
+  session optional pam_recent.so - MYLIMIT
 
-  and every successful login will clear this client's ip history.
+ and every successful login will clear this client's ip history,
+ if pam was invoked with sufficient privileges (as root)
+ or if you have modified the permissions of the ipt_recent files 
+ in proc. This can be done globally via ipt_recent's module parameters
+ (see the iptables manpage) or by simply chown/chmod'ing the 
+ files in /proc/net/ipt_recent after loading your firewall config
+ (but this method works only for 2.6 series kernels).
 
+ if you give "+" as first argument, then pam_recent will add an entry
+ for this client ip address.  if you give no second argument, the
+ recent list "DEFAULT" will be used.  if you give any other arguments,
+ you will get a syslogged error message - as will happen on errors.
 
-if you give "+" as first argument, then pam_recent will add an entry
-for this client ip address.  if you give no second argument, the
-recent list "DEFAULT" will be used.  if you give any other arguments,
-you will get a syslogged error message - as will happen on errors.
+ one final caveat: ipt_recent does not work for ipv6 addresses,
+ so this module can not support ipv6 either.
 
+ changelog: at the end of the file
 */
 
 #include <stdio.h>
@@ -122,6 +138,33 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
       return PAM_SESSION_ERR;
    }
    rhost=gethostbyname(rhostname);
+   /* rfc1884, 2.2.3: ipv4 addresses in ipv6 mixed notation
+      6 colon entries (all zero or 5 zeros, then ffff), 
+      then the usual dotted-quad,
+      or ::1.2.3.4 or ::ffff:1.2.3.4
+      but somehow glibc's gethostbyname doesn't grok these,
+      so we extract the ipv4 part by hand. gah.
+    */
+   if (!rhost && strchr(rhostname,':'))
+   {
+      char *p=NULL;
+      if (!strncmp(rhostname,"::",2))
+      {
+	 p=rhostname+2;
+	 if (!strncasecmp(p,"ffff:",5))
+	    p+=5;
+      }
+      else if (!strncasecmp(rhostname,"0:0:0:0:0:",10))
+      {
+	 p=rhostname+10;
+	 if (!strncasecmp(p,"0:",2))
+	    p+=2;
+	 else if (!strncasecmp(p,"ffff:",5))
+	    p+=5;
+      }
+      if (p)
+	 rhost=gethostbyname(p);
+   }
    if (!rhost)
    {
       syslog(LOG_ERR,"could not lookup address for %s: %d",rhostname,h_errno);
@@ -152,3 +195,13 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 }
 
 
+/* version history:
+
+   $Log:$
+
+   revision 1.2	2006/06/15 05:00:02	az
+   updated/reformatted docs
+
+   revision 1.1 2006/06/14 06:24:24	az
+   Initial revision
+*/
