@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.2 2006/06/15 05:00:02 az Exp az $
+ * $Id: pam_recent.c,v 1.3 2007/05/20 04:22:18 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -118,8 +118,8 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 	 remove=1;
       else
       {
-	 syslog(LOG_ERR,"expected \"%s\" or \"%s\" as argument, got \"%s\" %d",
-		ACTION_REMOVE,ACTION_ADD,argv[0],r);
+	 syslog(LOG_ERR,"expected \"%s\" or \"%s\" as argument, got \"%s\"",
+		ACTION_REMOVE,ACTION_ADD,argv[0]);
 	 return PAM_SESSION_ERR;
       }
    }
@@ -197,7 +197,13 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 
 /* version history:
 
-   $Log:$
+   $Log: pam_recent.c,v $
+   Revision 1.3  2007/05/20 04:22:18  az
+   fixed the handling of ipv4 addresses in ipv6 syntax, applied
+   some documentation updates and extended the documentation somewhat.
+   thanks to Tony Nelson (tonynelson at georgeanelson.com) for the
+   problem report and the patch.
+
 
    revision 1.2	2006/06/15 05:00:02	az
    updated/reformatted docs
