@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.3 2007/05/20 04:22:18 az Exp az $
+ * $Id: pam_recent.c,v 1.4 2007/12/11 11:32:54 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -21,8 +21,11 @@
  address after the login has succeeded.
 
  installation:
-  gcc -shared -fPIC -Xlinker -x -o pam_recent.so pam_recent.c  
-  cp pam_recent.so /lib/modules/security/
+  * get the required pam libraries and headers (libpam0g-dev in debian)
+  * compile the module:
+  	gcc -shared -fPIC -Xlinker -x -o pam_recent.so pam_recent.c  
+  * copy it to the relevant place
+	cp pam_recent.so /lib/modules/security/
 
  configuration: get your firewall to rate limit, the example here 
  is for ssh and ftp and assumes that these rules will only be 
@@ -71,6 +74,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <netdb.h>
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -85,7 +89,8 @@
 #define ACTION_ADD "+"
 #define NAME "DEFAULT"
 #define MODNAME "pam_recent"
-#define LOC "/proc/net/ipt_recent"
+#define LOCOLD "/proc/net/ipt_recent"
+#define LOCNEW "/proc/net/xt_recent"
 
 PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, const char **argv)
 {
@@ -123,12 +128,16 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 	 return PAM_SESSION_ERR;
       }
    }
-   
+
+   /* optional second arg: what recent db to add/remove from */   
    dbname=(argc==2)?argv[1]:NAME;
       
-   /* optional second arg: what recent db to add/remove from */
+   /* kernel <2.6.28? ipt_recent, afterwards xt_recent */
    snprintf(fname,sizeof(fname),"%s/%s",
-	    LOC,dbname);
+	    LOCOLD,dbname);
+   if (!access(fname,F_OK))
+      snprintf(fname,sizeof(fname),"%s/%s",
+	    LOCNEW,dbname);
    
    /* lets find out the proper ip address */
    r=pam_get_item(pamh, PAM_RHOST, (void *)&rhostname);
@@ -198,6 +207,12 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.4  2007/12/11 11:32:54  az
+   Robert Scheck (robert at fedoraproject.org) suggested I get rid of
+   a compiler warning by doing less silly things. I hereby comply :-)
+
+   (the code syslogged a nonsensical variable in case of bad arguments.)
+
    Revision 1.3  2007/05/20 04:22:18  az
    fixed the handling of ipv4 addresses in ipv6 syntax, applied
    some documentation updates and extended the documentation somewhat.
