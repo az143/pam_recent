@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.4 2007/12/11 11:32:54 az Exp az $
+ * $Id: pam_recent.c,v 1.5 2009/02/25 11:16:35 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -107,11 +107,9 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
    FILE *f;
    struct hostent *rhost;
 
-   openlog(MODNAME,0,LOG_AUTHPRIV);
-
    if (argc<1 || argc>2)
    {
-      syslog(LOG_ERR,"expected 1 or 2 arguments but got %d\n",argc);
+      pam_syslog(pamh,LOG_ERR,"expected 1 or 2 arguments but got %d\n",argc);
       return PAM_SESSION_ERR;
    }
 
@@ -123,8 +121,9 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 	 remove=1;
       else
       {
-	 syslog(LOG_ERR,"expected \"%s\" or \"%s\" as argument, got \"%s\"",
-		ACTION_REMOVE,ACTION_ADD,argv[0]);
+	 pam_syslog(pamh,LOG_ERR,
+		    "expected \"%s\" or \"%s\" as argument, got \"%s\"",
+		    ACTION_REMOVE,ACTION_ADD,argv[0]);
 	 return PAM_SESSION_ERR;
       }
    }
@@ -143,9 +142,19 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
    r=pam_get_item(pamh, PAM_RHOST, (void *)&rhostname);
    if (r != PAM_SUCCESS )
    {
-      syslog(LOG_ERR,"could not get PAM_RHOST: %s",pam_strerror(pamh,r));
+      pam_syslog(pamh,LOG_ERR,"could not get PAM_RHOST: %s",
+		 pam_strerror(pamh,r));
       return PAM_SESSION_ERR;
    }
+   
+   /* hmm, no rhost? seems this pam stack is misconfigured and
+      we're being run for non-networked logins... */
+   if (rhostname == NULL) 
+   {
+      pam_syslog(pamh, LOG_ERR, "no PAM_RHOST, not a network login");
+      return PAM_SESSION_ERR;
+   }
+
    rhost=gethostbyname(rhostname);
    /* rfc1884, 2.2.3: ipv4 addresses in ipv6 mixed notation
       6 colon entries (all zero or 5 zeros, then ffff), 
@@ -176,7 +185,8 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
    }
    if (!rhost)
    {
-      syslog(LOG_ERR,"could not lookup address for %s: %d",rhostname,h_errno);
+      pam_syslog(pamh,LOG_ERR,
+		 "could not lookup address for %s: %d",rhostname,h_errno);
       return PAM_SESSION_ERR;
    }
 
@@ -184,22 +194,23 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 		 rhost->h_addr_list[0],
 		 address,sizeof(address))!=address)
    {
-      syslog(LOG_ERR,"address conversion error: %s",strerror(errno));
+      pam_syslog(pamh,LOG_ERR,"address conversion error: %s",strerror(errno));
       return PAM_SESSION_ERR;
    }
 
    /* and write to the pseudo-file */
    if (!(f=fopen(fname,"w")))
    {
-      syslog(LOG_ERR,"can't open %s: %s",fname,strerror(errno));
+      pam_syslog(pamh,LOG_ERR,"can't open %s: %s",fname,strerror(errno));
       return PAM_SESSION_ERR;
    }
 
    fprintf(f,"%s%s\n",
 	   remove?ACTION_REMOVE:ACTION_ADD,address);
    fclose(f);
-   syslog(LOG_DEBUG,(remove?"removed %s/%s from list %s":"added %s/%s to list %s"),
-		     rhostname,address,dbname);
+   pam_syslog(pamh,LOG_DEBUG,
+	      (remove?"removed %s/%s from list %s":"added %s/%s to list %s"),
+	      rhostname,address,dbname);
    return PAM_SUCCESS;
 }
 
@@ -207,6 +218,13 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.5  2009/02/25 11:16:35  az
+   Till Elsner (Till.Elsner at uni-duesseldorf.de) suggested some doc fixes and
+   another header inclusion that seems to be necessary on ubuntu boxes.
+
+   also added support for ipt_recent in 2.6.28+, which uses a different /proc directory by default
+   (but staying backwards-compatible).
+
    Revision 1.4  2007/12/11 11:32:54  az
    Robert Scheck (robert at fedoraproject.org) suggested I get rid of
    a compiler warning by doing less silly things. I hereby comply :-)
