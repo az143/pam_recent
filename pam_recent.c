@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.5 2009/02/25 11:16:35 az Exp az $
+ * $Id: pam_recent.c,v 1.6 2009/03/20 02:16:58 az Exp $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -133,10 +133,12 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
       
    /* kernel <2.6.28? ipt_recent, afterwards xt_recent */
    snprintf(fname,sizeof(fname),"%s/%s",
-	    LOCOLD,dbname);
-   if (!access(fname,F_OK))
-      snprintf(fname,sizeof(fname),"%s/%s",
 	    LOCNEW,dbname);
+   if (access(fname,F_OK))
+   {
+      snprintf(fname,sizeof(fname),"%s/%s",
+	    LOCOLD,dbname);
+   }
    
    /* lets find out the proper ip address */
    r=pam_get_item(pamh, PAM_RHOST, (void *)&rhostname);
@@ -218,6 +220,11 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.6  2009/03/20 02:16:58  az
+   Thomas Kula (tkula at umich.edu) suggested a bit more robustness for
+   situations where pam_recent is run (uselessly) for non-networked logins,
+   and to use pam_syslog.
+
    Revision 1.5  2009/02/25 11:16:35  az
    Till Elsner (Till.Elsner at uni-duesseldorf.de) suggested some doc fixes and
    another header inclusion that seems to be necessary on ubuntu boxes.
