@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.6 2009/03/20 02:16:58 az Exp $
+ * $Id: pam_recent.c,v 1.7 2009/05/06 01:58:02 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -92,6 +92,13 @@
 #define LOCOLD "/proc/net/ipt_recent"
 #define LOCNEW "/proc/net/xt_recent"
 
+/* pam 1.x has pam_syslog, older pam libs don't */
+#if __LINUX_PAM__ >= 1
+#define LOGIT(...) {pam_syslog(pamh,__VA_ARGS__);}
+#else
+#define LOGIT(...) {syslog(__VA_ARGS__);}
+#endif
+
 PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, const char **argv)
 {
    return PAM_SUCCESS;
@@ -109,7 +116,7 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 
    if (argc<1 || argc>2)
    {
-      pam_syslog(pamh,LOG_ERR,"expected 1 or 2 arguments but got %d\n",argc);
+      LOGIT(LOG_ERR,"expected 1 or 2 arguments but got %d\n",argc);
       return PAM_SESSION_ERR;
    }
 
@@ -121,7 +128,7 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 	 remove=1;
       else
       {
-	 pam_syslog(pamh,LOG_ERR,
+	 LOGIT(LOG_ERR,
 		    "expected \"%s\" or \"%s\" as argument, got \"%s\"",
 		    ACTION_REMOVE,ACTION_ADD,argv[0]);
 	 return PAM_SESSION_ERR;
@@ -144,7 +151,7 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
    r=pam_get_item(pamh, PAM_RHOST, (void *)&rhostname);
    if (r != PAM_SUCCESS )
    {
-      pam_syslog(pamh,LOG_ERR,"could not get PAM_RHOST: %s",
+      LOGIT(LOG_ERR,"could not get PAM_RHOST: %s",
 		 pam_strerror(pamh,r));
       return PAM_SESSION_ERR;
    }
@@ -153,7 +160,7 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
       we're being run for non-networked logins... */
    if (rhostname == NULL) 
    {
-      pam_syslog(pamh, LOG_ERR, "no PAM_RHOST, not a network login");
+      LOGIT( LOG_ERR, "no PAM_RHOST, not a network login");
       return PAM_SESSION_ERR;
    }
 
@@ -187,7 +194,7 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
    }
    if (!rhost)
    {
-      pam_syslog(pamh,LOG_ERR,
+      LOGIT(LOG_ERR,
 		 "could not lookup address for %s: %d",rhostname,h_errno);
       return PAM_SESSION_ERR;
    }
@@ -196,21 +203,21 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 		 rhost->h_addr_list[0],
 		 address,sizeof(address))!=address)
    {
-      pam_syslog(pamh,LOG_ERR,"address conversion error: %s",strerror(errno));
+      LOGIT(LOG_ERR,"address conversion error: %s",strerror(errno));
       return PAM_SESSION_ERR;
    }
 
    /* and write to the pseudo-file */
    if (!(f=fopen(fname,"w")))
    {
-      pam_syslog(pamh,LOG_ERR,"can't open %s: %s",fname,strerror(errno));
+      LOGIT(LOG_ERR,"can't open %s: %s",fname,strerror(errno));
       return PAM_SESSION_ERR;
    }
 
    fprintf(f,"%s%s\n",
 	   remove?ACTION_REMOVE:ACTION_ADD,address);
    fclose(f);
-   pam_syslog(pamh,LOG_DEBUG,
+   LOGIT(LOG_DEBUG,
 	      (remove?"removed %s/%s from list %s":"added %s/%s to list %s"),
 	      rhostname,address,dbname);
    return PAM_SUCCESS;
@@ -220,6 +227,9 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.7  2009/05/06 01:58:02  az
+   fixed stupid mistake regarding fallback for kernels < 2.6.28
+
    Revision 1.6  2009/03/20 02:16:58  az
    Thomas Kula (tkula at umich.edu) suggested a bit more robustness for
    situations where pam_recent is run (uselessly) for non-networked logins,
