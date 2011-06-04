@@ -1,12 +1,12 @@
 /*
- * $Id: pam_recent.c,v 1.7 2009/05/06 01:58:02 az Exp az $
+ * $Id: pam_recent.c,v 1.8 2009/05/11 02:33:41 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
  * Author:		Alexander Zangerl (az)
  * Licence:		GPL version 1 or version 2
  
- a pam module for linux systems to adjust an iptables recent list,
+ this is a pam module for linux systems to adjust an iptables recent list,
  which makes the rate limiting of connections from unknown locations
  easier.
 
@@ -18,7 +18,9 @@
  have no problem and do not need this module. if however, you have
  unknown clients who you don't want to rate-limit if they manage a
  correct login, then this module allows you to clear the client's ip
- address after the login has succeeded.
+ address after the login has succeeded. you can also set/clear the
+ client's ip address using this module in different pam phases, e.g.
+ set in the authenticate phase and clear iff things progress to session.
 
  installation:
   * get the required pam libraries and headers (libpam0g-dev in debian)
@@ -27,7 +29,11 @@
   * copy it to the relevant place
 	cp pam_recent.so /lib/modules/security/
 
- configuration: get your firewall to rate limit, the example here 
+ configuration: 
+ 
+ * scenario one, firewall sets and checks, pam_recent only clears
+
+ get your firewall to rate limit, the example here 
  is for ssh and ftp and assumes that these rules will only be 
  applied to new connection packets (so handle existing exchanges 
  somewhere before these). the example also uses a custom chain
@@ -43,7 +49,8 @@
  iptables -A sshlimited -m recent --name MYLIMIT --set -j ACCEPT 
 
  this allows up to two new ssh or ftp connections per 60 seconds 
- and records time stamps in /proc/net/ipt_recent/MYLIMIT. 
+ and records time stamps in /proc/net/ipt_recent/MYLIMIT (or
+ /proc/net/xt_recent/... in more recent kernels).
  then add the usual stanza to the relevant pam config files 
  (here /etc/pam.d/ssh and ftp) in the right place (order matters!):
 
@@ -57,10 +64,38 @@
  files in /proc/net/ipt_recent after loading your firewall config
  (but this method works only for 2.6 series kernels).
 
- if you give "+" as first argument, then pam_recent will add an entry
- for this client ip address.  if you give no second argument, the
- recent list "DEFAULT" will be used.  if you give any other arguments,
- you will get a syslogged error message - as will happen on errors.
+ the first argument to pam_recent must be  "-" or "+", the second 
+ arg is the name of the iptables recent list. if you give no second 
+ argument, the recent list "DEFAULT" will be used.  
+ if you give any other arguments, you will get a syslogged error 
+ message - as will happen on errors.
+
+ * scenario two, pam_recent sets and clears, firewall only enforces
+
+ if you call pam_recent with "+" as first argument, then it will 
+ add an entry for this client ip address.
+
+ putting the following entries in a service's pam config (order relative
+ to other components is essential!) will make pam_recent first
+ set an entry and clear it if and only if authentication succeeds.
+ 
+  # put the account line BEFORE any real authentication module calls!
+  account  required	    pam_recent.so + TESTY
+  # put the session line after all required session modules
+  session  required	    pam_recent.so - TESTY
+
+ a simple/single iptables rule like
+
+  iptables -A limited -m recent --name TESTY --rcheck --hitcount 2
+   --seconds 60 -j DROP
+
+ will then take care of enforcing your login rate limiting. this is
+ especially useful for services which don't terminate the network 
+ connection after an unsuccessful login, e.g. many IMAP servers.
+
+ caveat: not all applications use all pam phases; pam_recent logs
+ its activity (with the phase) so it's not too hard to determine 
+ whether your service uses account or session.
 
  one final caveat: ipt_recent does not work for ipv6 addresses,
  so this module can not support ipv6 either.
@@ -79,6 +114,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#define PAM_SM_AUTH
+#define PAM_SM_ACCOUNT
 #define PAM_SM_SESSION
 #include <security/pam_modules.h>
 #include <security/_pam_macros.h>
@@ -94,19 +131,16 @@
 
 /* pam 1.x has pam_syslog, older pam libs don't */
 #if __LINUX_PAM__ >= 1
+#include <security/pam_ext.h>
 #define LOGIT(...) {pam_syslog(pamh,__VA_ARGS__);}
 #else
 #define LOGIT(...) {syslog(__VA_ARGS__);}
 #endif
 
-PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, const char **argv)
-{
-   return PAM_SUCCESS;
-}
 
-
-PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
-				   int argc, const char **argv)
+/* this is where it all happens... */
+static int recent(pam_handle_t *pamh, int flags,
+	   int argc, const char **argv)
 {
    int remove,r;
    char fname[PATH_MAX], *rhostname,address[128];
@@ -223,10 +257,42 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
    return PAM_SUCCESS;
 }
 
+/* pam entry points */
+PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv)
+{    
+   return recent(pamh,flags,argc,argv);
+}
+
+PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,int argc, const char **argv)
+{    
+   return recent(pamh,flags,argc,argv);
+}
+
+PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,int argc, const char **argv)
+{    
+   return recent(pamh,flags,argc,argv);
+}
+
+
+
+/* helper functions that don't apply to pam_recent but which need to be provided regardless  */
+PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv)
+{
+   return PAM_SUCCESS;
+}
+
+PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, const char **argv)
+{
+   return PAM_SUCCESS;
+}
+
 
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.8  2009/05/11 02:33:41  az
+   added backwards-compatibility for logging: pam 1+ use pam_syslog, older ones use syslog straight.
+
    Revision 1.7  2009/05/06 01:58:02  az
    fixed stupid mistake regarding fallback for kernels < 2.6.28
 
