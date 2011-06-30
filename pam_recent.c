@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.8 2009/05/11 02:33:41 az Exp az $
+ * $Id: pam_recent.c,v 1.9 2011/06/04 05:13:57 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -24,8 +24,8 @@
 
  installation:
   * get the required pam libraries and headers (libpam0g-dev in debian)
-  * compile the module:
-  	gcc -shared -fPIC -Xlinker -x -o pam_recent.so pam_recent.c  
+  * compile and link the module:
+  	gcc -shared -fPIC -Xlinker -x -o pam_recent.so pam_recent.c -lpam
   * copy it to the relevant place
 	cp pam_recent.so /lib/modules/security/
 
@@ -77,11 +77,13 @@
 
  putting the following entries in a service's pam config (order relative
  to other components is essential!) will make pam_recent first
- set an entry and clear it if and only if authentication succeeds.
+ add an entry (before the normal authentication steps commence) 
+ and clear it if and only if authentication succeeds.
  
   # put the account line BEFORE any real authentication module calls!
-  account  required	    pam_recent.so + TESTY
-  # put the session line after all required session modules
+  auth     required	    pam_recent.so + TESTY
+  # put the session line AFTER all required session modules
+  # you might also use the "account" pam phase here, see caveat below
   session  required	    pam_recent.so - TESTY
 
  a simple/single iptables rule like
@@ -99,6 +101,8 @@
 
  one final caveat: ipt_recent does not work for ipv6 addresses,
  so this module can not support ipv6 either.
+
+ references for pam: http://www.kernel.org/pub/linux/libs/pam/Linux-PAM-html/
 
  changelog: at the end of the file
 */
@@ -290,6 +294,10 @@ PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, con
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.9  2011/06/04 05:13:57  az
+   Lorenzo M. Catucci (catucci at ccd.uniroma2.it) suggested usage scenario two
+   and provided a patch for handling other pam phases. mille grazie!
+
    Revision 1.8  2009/05/11 02:33:41  az
    added backwards-compatibility for logging: pam 1+ use pam_syslog, older ones use syslog straight.
 
