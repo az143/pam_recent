@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.9 2011/06/04 05:13:57 az Exp az $
+ * $Id: pam_recent.c,v 1.10 2011/06/30 00:57:57 az Exp az $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -22,12 +22,24 @@
  client's ip address using this module in different pam phases, e.g.
  set in the authenticate phase and clear iff things progress to session.
 
+ pam_recent works with both ipv4 and v6 addresses, if you have a
+ reasonably modern kernel whose xt_recent match is compiled for
+ both ip v4 anv v6. in dual-stack scenarios the recent 'files' 
+ are shared between v4 and v6, so you can use the same single 
+ match name with ip6tables, iptables and pam_recent.
+ 
+ caveat: pam generally does not report the raw ip address of the 
+ client, but the client's hostname - pam_recent therefore has to
+ perform a forward lookup, and mark/unmark ALL ip addresses that
+ were returned.
+ 
+
  installation:
   * get the required pam libraries and headers (libpam0g-dev in debian)
   * compile and link the module:
   	gcc -shared -fPIC -Xlinker -x -o pam_recent.so pam_recent.c -lpam
   * copy it to the relevant place
-	cp pam_recent.so /lib/modules/security/
+	cp pam_recent.so /lib/security/
 
  configuration: 
  
@@ -99,9 +111,6 @@
  its activity (with the phase) so it's not too hard to determine 
  whether your service uses account or session.
 
- one final caveat: ipt_recent does not work for ipv6 addresses,
- so this module can not support ipv6 either.
-
  references for pam: http://www.kernel.org/pub/linux/libs/pam/Linux-PAM-html/
 
  changelog: at the end of the file
@@ -147,10 +156,11 @@ static int recent(pam_handle_t *pamh, int flags,
 	   int argc, const char **argv)
 {
    int remove,r;
-   char fname[PATH_MAX], *rhostname,address[128];
+   char fname[PATH_MAX], *rhostname, address[128];
    const char *dbname;
    FILE *f;
-   struct hostent *rhost;
+   int lookupres;
+   struct addrinfo *hostaddys, *curaddress, *prevaddress;
 
    if (argc<1 || argc>2)
    {
@@ -195,69 +205,67 @@ static int recent(pam_handle_t *pamh, int flags,
    }
    
    /* hmm, no rhost? seems this pam stack is misconfigured and
-      we're being run for non-networked logins... */
+      we're being run for non-networked logins...
+      note that PAM_RHOST normally is a host name */
    if (rhostname == NULL) 
    {
       LOGIT( LOG_ERR, "no PAM_RHOST, not a network login");
       return PAM_SESSION_ERR;
    }
 
-   rhost=gethostbyname(rhostname);
-   /* rfc1884, 2.2.3: ipv4 addresses in ipv6 mixed notation
-      6 colon entries (all zero or 5 zeros, then ffff), 
-      then the usual dotted-quad,
-      or ::1.2.3.4 or ::ffff:1.2.3.4
-      but somehow glibc's gethostbyname doesn't grok these,
-      so we extract the ipv4 part by hand. gah.
-    */
-   if (!rhost && strchr(rhostname,':'))
+   /* we can get more than one address back, and not knowing which was the correct one, 
+      we need to walk and operate on all of them. however, we bail out on the first problem */
+   lookupres = getaddrinfo(rhostname,NULL,NULL,&hostaddys);
+   if (lookupres)
    {
-      char *p=NULL;
-      if (!strncmp(rhostname,"::",2))
+      LOGIT(LOG_ERR, "could not lookup address for %s: %s",rhostname,gai_strerror(lookupres));
+      return PAM_SESSION_ERR;
+   }
+   for (curaddress = hostaddys; curaddress ; curaddress = curaddress->ai_next)
+   {
+      char alreadyseen = 0;
+
+      /* address to string conversion; less hassle than separating inet_ntop inputs in v4/v6 */
+      if (getnameinfo(curaddress->ai_addr, curaddress->ai_addrlen,
+		      address, sizeof(address),NULL,0,NI_NUMERICHOST))
       {
-	 p=rhostname+2;
-	 if (!strncasecmp(p,"ffff:",5))
-	    p+=5;
+	 LOGIT(LOG_ERR,"address conversion error: %s",strerror(errno));
+	 freeaddrinfo(hostaddys);
+	 return PAM_SESSION_ERR;
       }
-      else if (!strncasecmp(rhostname,"0:0:0:0:0:",10))
+
+      /* make sure we handle this address ONCE, compare current against all previous addresses */
+      for (prevaddress = hostaddys; prevaddress && prevaddress != curaddress; prevaddress = prevaddress->ai_next)
       {
-	 p=rhostname+10;
-	 if (!strncasecmp(p,"0:",2))
-	    p+=2;
-	 else if (!strncasecmp(p,"ffff:",5))
-	    p+=5;
+	 if ((curaddress->ai_family == AF_INET && prevaddress->ai_family == AF_INET
+	      && !memcmp(&((struct sockaddr_in *)curaddress->ai_addr)->sin_addr,
+			 &((struct sockaddr_in*)prevaddress->ai_addr)->sin_addr, 4))
+	    || (curaddress->ai_family == AF_INET6 && prevaddress->ai_family == AF_INET6
+	      && !memcmp(&((struct sockaddr_in6 *)curaddress->ai_addr)->sin6_addr,
+			 &((struct sockaddr_in6*)prevaddress->ai_addr)->sin6_addr, 16)))
+	 {
+	    alreadyseen=1;
+	    break;
+	 }
       }
-      if (p)
-	 rhost=gethostbyname(p);
-   }
-   if (!rhost)
-   {
-      LOGIT(LOG_ERR,
-		 "could not lookup address for %s: %d",rhostname,h_errno);
-      return PAM_SESSION_ERR;
-   }
+      if (alreadyseen)
+	 continue;
 
-   if (inet_ntop(rhost->h_addrtype,
-		 rhost->h_addr_list[0],
-		 address,sizeof(address))!=address)
-   {
-      LOGIT(LOG_ERR,"address conversion error: %s",strerror(errno));
-      return PAM_SESSION_ERR;
-   }
+      /* and write to the pseudo-file */
+      if (!(f=fopen(fname,"w")))
+      {
+	 LOGIT(LOG_ERR,"can't open %s: %s",fname,strerror(errno));
+	 freeaddrinfo(hostaddys);
+	 return PAM_SESSION_ERR;
+      }
 
-   /* and write to the pseudo-file */
-   if (!(f=fopen(fname,"w")))
-   {
-      LOGIT(LOG_ERR,"can't open %s: %s",fname,strerror(errno));
-      return PAM_SESSION_ERR;
+      fprintf(f,"%s%s\n", remove?ACTION_REMOVE:ACTION_ADD,address);
+      fclose(f);
+      LOGIT(LOG_DEBUG,
+	    (remove?"removed %s/%s from list %s":"added %s/%s to list %s"),
+	    rhostname,address,dbname);
    }
-
-   fprintf(f,"%s%s\n",
-	   remove?ACTION_REMOVE:ACTION_ADD,address);
-   fclose(f);
-   LOGIT(LOG_DEBUG,
-	      (remove?"removed %s/%s from list %s":"added %s/%s to list %s"),
-	      rhostname,address,dbname);
+   freeaddrinfo(hostaddys);
    return PAM_SUCCESS;
 }
 
@@ -294,6 +302,9 @@ PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, con
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.10  2011/06/30 00:57:57  az
+   some more documentation finetuning
+
    Revision 1.9  2011/06/04 05:13:57  az
    Lorenzo M. Catucci (catucci at ccd.uniroma2.it) suggested usage scenario two
    and provided a patch for handling other pam phases. mille grazie!
