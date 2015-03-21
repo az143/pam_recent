@@ -1,5 +1,5 @@
 /*
- * $Id: pam_recent.c,v 1.10 2011/06/30 00:57:57 az Exp az $
+ * $Id: pam_recent.c,v 1.11 2014/11/08 04:06:57 az Exp $
  * 
  * File:		pam_recent.c
  * Date:		Wed Jun 14 16:06:11 2006
@@ -302,6 +302,13 @@ PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc, con
 /* version history:
 
    $Log: pam_recent.c,v $
+   Revision 1.11  2014/11/08 04:06:57  az
+   xt_recent nowadays does both ipv4 and v6, so i've updated pam_recent
+   to fully support ipv4 and ipv6 addresses. this includes using the more
+   modern forward lookup functions getnameinfo/getaddrinfo. pam_recent
+   now also handles multiple addresses for a name more sensibly: all
+   addresses are marked/unmarked. doc updated accordingly.
+
    Revision 1.10  2011/06/30 00:57:57  az
    some more documentation finetuning
 
