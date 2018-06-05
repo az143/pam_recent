@@ -35,10 +35,9 @@ returned.
 * verify that your kernel has CONFIG\_NETFILTER\_XT\_MATCH\_RECENT
 * get the required pam libraries and headers (libpam0g-dev in debian)
 * compile and link the module:
-  `gcc -shared -fPIC -Xlinker -x -o pam\_recent.so pam_recent.c -lpam`
+  `gcc -shared -fPIC -Xlinker -x -o pam_recent.so pam_recent.c -lpam`
 * copy it to the relevant place where the other pam modules live:
-  `cp pam\_recent.so /lib/x86_64-linux-gnu/security/`
-
+  `cp pam_recent.so /lib/x86_64-linux-gnu/security/`
   (on older systems the pam modules might be in `/lib/security/`.)
 
 #  configuration:
@@ -65,7 +64,7 @@ records time stamps in /proc/net/ipt\_recent/MYLIMIT (or
 stanza to the relevant pam config files (here /etc/pam.d/ssh and ftp)
 in the right place (order matters!):
 
-	session optional pam\_recent.so - MYLIMIT
+	session optional pam_recent.so - MYLIMIT
 
 and every successful login will clear this client's ip history, if pam
 was invoked with sufficient privileges (as root) or if you have
@@ -92,10 +91,10 @@ first add an entry (before the normal authentication steps commence)
 and clear it if and only if authentication succeeds.
 
 	 # put the account line BEFORE any real authentication module calls!
-	 auth     required	    pam\_recent.so + TESTY
+	 auth     required	    pam_recent.so + TESTY
 	 # put the session line AFTER all required session modules
 	 # you might also use the "account" pam phase here, see caveat below
-	 session  required	    pam\_recent.so - TESTY
+	 session  required	    pam_recent.so - TESTY
 
 a simple/single iptables rule like
 
@@ -111,8 +110,8 @@ activity (with the phase) so it's not too hard to determine whether
 your service uses account or session.
 
 # further info
-* [http://snafu.priv.at/mystuff/recent-plus-pam.html](my original article);
-  you might also want to search [http://snafu.priv.at/](my site)
+* [my original article](http://snafu.priv.at/mystuff/recent-plus-pam.html);
+  you might also want to search [my site](http://snafu.priv.at/)
   for `pam_recent` for the changes since then
 
 * man iptables-extensions (at least on debian)
