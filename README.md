@@ -7,7 +7,7 @@ which makes the rate limiting of connections from unknown locations
 easier.
 
 The idea is that one uses this module with iptables' recent module to
-rate-limit connections to authenticated services (eg. ssh and ftp) 
+rate-limit connections to authenticated services (eg. ssh and ftp)
 without penalizing successful logins.
 
 if your good clients are all known anyway (static ip etc.), then you
@@ -24,22 +24,25 @@ reasonably modern kernel whose xt_recent match is compiled for both ip
 v4 anv v6. in dual-stack scenarios the recent 'files' are shared
 between v4 and v6, so you can use the same single match name with
 ip6tables, iptables and pam\_recent.
- 
+
 caveat: pam generally does not report the raw ip address of the
 client, but the client's hostname - pam\_recent therefore has to
 perform a forward lookup, and mark/unmark ALL ip addresses that were
 returned.
- 
+
 #  installation
 
+* verify that your kernel has CONFIG\_NETFILTER\_XT\_MATCH\_RECENT
 * get the required pam libraries and headers (libpam0g-dev in debian)
 * compile and link the module:
   `gcc -shared -fPIC -Xlinker -x -o pam\_recent.so pam_recent.c -lpam`
-* copy it to the relevant place
-  `cp pam\_recent.so /lib/security/`
+* copy it to the relevant place where the other pam modules live:
+  `cp pam\_recent.so /lib/x86_64-linux-gnu/security/`
+
+  (on older systems the pam modules might be in `/lib/security/`.)
 
 #  configuration:
- 
+
 ## scenario one, firewall sets and checks, pam\_recent only clears
 
 get your firewall to rate limit, the example here is for ssh and ftp
@@ -54,7 +57,7 @@ services may be conveniently grouped together in one rate-limited set.
 
 	iptables -A limited -m recent --name MYLIMIT --rcheck --hitcount 2 \
   	--seconds 60 -j DROP
-	iptables -A sshlimited -m recent --name MYLIMIT --set -j ACCEPT 
+	iptables -A sshlimited -m recent --name MYLIMIT --set -j ACCEPT
 
 this allows up to two new ssh or ftp connections per 60 seconds and
 records time stamps in /proc/net/ipt\_recent/MYLIMIT (or
@@ -80,14 +83,14 @@ happen on errors.
 
 ## scenario two, pam\_recent sets and clears, firewall only enforces
 
-if you call pam\_recent with "+" as first argument, then it will 
+if you call pam\_recent with "+" as first argument, then it will
 add an entry for this client ip address.
 
 putting the following entries in a service's pam config (order
 relative to other components is essential!) will make pam\_recent
 first add an entry (before the normal authentication steps commence)
 and clear it if and only if authentication succeeds.
- 
+
 	 # put the account line BEFORE any real authentication module calls!
 	 auth     required	    pam\_recent.so + TESTY
 	 # put the session line AFTER all required session modules
@@ -107,7 +110,11 @@ caveat: not all applications use all pam phases; pam\_recent logs its
 activity (with the phase) so it's not too hard to determine whether
 your service uses account or session.
 
-# original article
+# further info
+* [http://snafu.priv.at/mystuff/recent-plus-pam.html](my original article);
+  you might also want to search [http://snafu.priv.at/](my site)
+  for `pam_recent` for the changes since then
 
-[http://snafu.priv.at/mystuff/recent-plus-pam.html](http://snafu.priv.at/mystuff/recent-plus-pam.html) (and you can search for `pam_recent` for info about the changes since then)
+* man iptables-extensions (at least on debian)
 
+* `iptables -m recent --help`
